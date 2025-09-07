@@ -104,6 +104,7 @@ type DDNSMonitor struct {
 	listenPort      string
 	apiKey          string
 	httpServer      *http.Server
+	checkInterval   time.Duration
 }
 
 type RestartRequest struct {
@@ -121,6 +122,7 @@ type Args struct {
 	listenPort      string
 	apiKey          string
 	logLevel        string
+	checkInterval   string
 	help            bool
 }
 
@@ -169,6 +171,8 @@ func parseArgs() *Args {
 			args.apiKey = value
 		case "--log-level":
 			args.logLevel = value
+		case "--check-interval":
+			args.checkInterval = value
 		default:
 			fmt.Fprintf(os.Stderr, "Error: Unknown option '%s'\n", key)
 			os.Exit(1)
@@ -186,6 +190,7 @@ func printUsage() {
 	fmt.Println("  --listen-port string         HTTP API listen port")
 	fmt.Println("  --api-key string             API key for authentication")
 	fmt.Println("  --log-level string           Log level: debug, info, warn, error (default: info)")
+	fmt.Println("  --check-interval string      DNS check interval (e.g., 10s, 1m, 5m) (default: 10s)")
 	fmt.Println("  --help                       Show this help message")
 	fmt.Println("")
 	fmt.Println("NOTES:")
@@ -220,6 +225,20 @@ func main() {
 	gin.DefaultWriter = io.Discard
 	gin.DefaultErrorWriter = io.Discard
 
+	checkInterval := 10 * time.Second
+	if args.checkInterval != "" {
+		var err error
+		checkInterval, err = time.ParseDuration(args.checkInterval)
+		if err != nil {
+			logger.Error("Invalid check interval format: %v", err)
+			os.Exit(1)
+		}
+		if checkInterval < time.Second {
+			logger.Error("Check interval must be at least 1 second")
+			os.Exit(1)
+		}
+	}
+
 	apiEnabled := args.listenAddress != "" && args.listenPort != "" && args.apiKey != ""
 
 	monitor := &DDNSMonitor{
@@ -228,6 +247,7 @@ func main() {
 		listenAddress:   args.listenAddress,
 		listenPort:      args.listenPort,
 		apiKey:          args.apiKey,
+		checkInterval:   checkInterval,
 	}
 	
 	if err := monitor.initialize(); err != nil {
@@ -562,7 +582,8 @@ func (m *DDNSMonitor) handleListInterfaces(c *gin.Context) {
 }
 
 func (m *DDNSMonitor) run(ctx context.Context) {
-	ticker := time.NewTicker(10 * time.Second)
+	logger.Info("DNS check interval: %v", m.checkInterval)
+	ticker := time.NewTicker(m.checkInterval)
 	defer ticker.Stop()
 
 	for {
