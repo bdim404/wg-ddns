@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -22,6 +23,70 @@ import (
 	
 	_ "github.com/fernvenue/wg-ddns/docs"
 )
+
+type LogLevel int
+
+const (
+	DEBUG LogLevel = iota
+	INFO
+	WARN
+	ERROR
+)
+
+var logLevelNames = map[LogLevel]string{
+	DEBUG: "DEBUG",
+	INFO:  "INFO",
+	WARN:  "WARN",
+	ERROR: "ERROR",
+}
+
+type Logger struct {
+	level LogLevel
+}
+
+func (l *Logger) log(level LogLevel, format string, args ...interface{}) {
+	if level < l.level {
+		return
+	}
+	
+	timestamp := time.Now().Format("2006/01/02 15:04:05")
+	levelName := logLevelNames[level]
+	message := fmt.Sprintf(format, args...)
+	fmt.Printf("%s [%s] %s\n", timestamp, levelName, message)
+}
+
+func (l *Logger) Debug(format string, args ...interface{}) {
+	l.log(DEBUG, format, args...)
+}
+
+func (l *Logger) Info(format string, args ...interface{}) {
+	l.log(INFO, format, args...)
+}
+
+func (l *Logger) Warn(format string, args ...interface{}) {
+	l.log(WARN, format, args...)
+}
+
+func (l *Logger) Error(format string, args ...interface{}) {
+	l.log(ERROR, format, args...)
+}
+
+var logger *Logger
+
+func parseLogLevel(level string) LogLevel {
+	switch strings.ToLower(level) {
+	case "debug":
+		return DEBUG
+	case "info":
+		return INFO
+	case "warn", "warning":
+		return WARN
+	case "error":
+		return ERROR
+	default:
+		return INFO
+	}
+}
 
 type Config struct {
 	Interface string
@@ -55,6 +120,7 @@ type Args struct {
 	listenAddress   string
 	listenPort      string
 	apiKey          string
+	logLevel        string
 	help            bool
 }
 
@@ -101,6 +167,8 @@ func parseArgs() *Args {
 			args.listenPort = value
 		case "--api-key":
 			args.apiKey = value
+		case "--log-level":
+			args.logLevel = value
 		default:
 			fmt.Fprintf(os.Stderr, "Error: Unknown option '%s'\n", key)
 			os.Exit(1)
@@ -117,6 +185,7 @@ func printUsage() {
 	fmt.Println("  --listen-address string      HTTP API listen address")
 	fmt.Println("  --listen-port string         HTTP API listen port")
 	fmt.Println("  --api-key string             API key for authentication")
+	fmt.Println("  --log-level string           Log level: debug, info, warn, error (default: info)")
 	fmt.Println("  --help                       Show this help message")
 	fmt.Println("")
 	fmt.Println("NOTES:")
@@ -140,6 +209,17 @@ func main() {
 		os.Exit(0)
 	}
 
+	logLevel := INFO
+	if args.logLevel != "" {
+		logLevel = parseLogLevel(args.logLevel)
+	}
+	
+	logger = &Logger{level: logLevel}
+	
+	log.SetOutput(io.Discard)
+	gin.DefaultWriter = io.Discard
+	gin.DefaultErrorWriter = io.Discard
+
 	apiEnabled := args.listenAddress != "" && args.listenPort != "" && args.apiKey != ""
 
 	monitor := &DDNSMonitor{
@@ -151,7 +231,8 @@ func main() {
 	}
 	
 	if err := monitor.initialize(); err != nil {
-		log.Fatalf("Failed to initialize monitor: %v", err)
+		logger.Error("Failed to initialize monitor: %v", err)
+		os.Exit(1)
 	}
 	defer monitor.cleanup()
 
@@ -163,7 +244,7 @@ func main() {
 
 	go func() {
 		<-sigChan
-		log.Println("Received shutdown signal")
+		logger.Info("Received shutdown signal")
 		cancel()
 	}()
 
@@ -171,7 +252,7 @@ func main() {
 		go monitor.startHTTPServer(ctx)
 	}
 
-	log.Println("WireGuard DDNS monitor started")
+	logger.Info("WireGuard DDNS monitor started")
 	monitor.run(ctx)
 }
 
@@ -194,7 +275,7 @@ func (m *DDNSMonitor) parseSingleInterface() error {
 		return fmt.Errorf("failed to parse config for %s: %w", m.singleInterface, err)
 	}
 	
-	log.Printf("Monitoring single interface: %s with %d domain endpoints", m.singleInterface, len(m.configs))
+	logger.Info("Monitoring single interface: %s with %d domain endpoints", m.singleInterface, len(m.configs))
 	return nil
 }
 
@@ -222,13 +303,13 @@ func (m *DDNSMonitor) discoverWireGuardConfigs() error {
 			
 			configPath := filepath.Join("/etc/wireguard", interfaceName+".conf")
 			if err := m.parseWireGuardConfig(interfaceName, configPath); err != nil {
-				log.Printf("Failed to parse config for %s: %v", interfaceName, err)
+				logger.Warn("Failed to parse config for %s: %v", interfaceName, err)
 				continue
 			}
 		}
 	}
 
-	log.Printf("Discovered %d WireGuard interfaces with domain endpoints", len(m.configs))
+	logger.Info("Discovered %d WireGuard interfaces with domain endpoints", len(m.configs))
 	return nil
 }
 
@@ -266,7 +347,7 @@ func (m *DDNSMonitor) parseWireGuardConfig(interfaceName, configPath string) err
 				}
 				
 				m.configs = append(m.configs, config)
-				log.Printf("Found domain endpoint: %s -> %s (interface: %s)", host, config.LastIP, interfaceName)
+				logger.Debug("Found domain endpoint: %s -> %s (interface: %s)", host, config.LastIP, interfaceName)
 			}
 		}
 	}
@@ -278,22 +359,25 @@ func (m *DDNSMonitor) checkEndpoints() {
 	for i := range m.configs {
 		config := &m.configs[i]
 		
+		logger.Debug("Resolving DNS for %s (interface: %s)", config.Hostname, config.Interface)
 		currentIP, err := net.ResolveIPAddr("ip4", config.Hostname)
 		if err != nil {
-			log.Printf("Failed to resolve %s: %v", config.Hostname, err)
+			logger.Warn("Failed to resolve %s: %v", config.Hostname, err)
 			continue
 		}
 
+		logger.Debug("DNS resolution result for %s: %s (interface: %s)", config.Hostname, currentIP.IP, config.Interface)
+
 		if !config.LastIP.Equal(currentIP.IP) {
-			log.Printf("IP change detected for %s: %s -> %s (interface: %s)", 
+			logger.Warn("IP change detected for %s: %s -> %s (interface: %s)", 
 				config.Hostname, config.LastIP, currentIP.IP, config.Interface)
 			
 			config.LastIP = currentIP.IP
 			
 			if err := m.restartWireGuardService(config.Interface); err != nil {
-				log.Printf("Failed to restart wg-quick@%s: %v", config.Interface, err)
+				logger.Error("Failed to restart wg-quick@%s: %v", config.Interface, err)
 			} else {
-				log.Printf("Successfully restarted wg-quick@%s.service", config.Interface)
+				logger.Warn("Successfully restarted wg-quick@%s.service", config.Interface)
 			}
 		}
 	}
@@ -320,6 +404,7 @@ func (m *DDNSMonitor) startHTTPServer(ctx context.Context) {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
+	router.Use(m.loggingMiddleware())
 	
 	v1 := router.Group("/api/v1")
 	v1.Use(m.authMiddleware())
@@ -336,22 +421,39 @@ func (m *DDNSMonitor) startHTTPServer(ctx context.Context) {
 		Handler: router,
 	}
 	
-	log.Printf("HTTP API server started on %s", addr)
-	log.Printf("Swagger UI available at http://%s/swagger/index.html", addr)
+	logger.Info("HTTP API server started on %s", addr)
+	logger.Info("Swagger UI available at http://%s/swagger/index.html", addr)
 	
 	go func() {
 		if err := m.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("HTTP server error: %v", err)
+			logger.Error("HTTP server error: %v", err)
 		}
 	}()
 	
 	<-ctx.Done()
 }
 
+func (m *DDNSMonitor) loggingMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		
+		c.Next()
+		
+		duration := time.Since(start)
+		clientIP := c.ClientIP()
+		method := c.Request.Method
+		path := c.Request.URL.Path
+		statusCode := c.Writer.Status()
+		
+		logger.Info("API %s %s - %d - %v - %s", method, path, statusCode, duration, clientIP)
+	}
+}
+
 func (m *DDNSMonitor) authMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		apiKey := c.GetHeader("X-API-Key")
 		if apiKey != m.apiKey {
+			logger.Warn("API authentication failed from %s", c.ClientIP())
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid API key"})
 			c.Abort()
 			return
@@ -376,6 +478,7 @@ func (m *DDNSMonitor) authMiddleware() gin.HandlerFunc {
 func (m *DDNSMonitor) handleRestart(c *gin.Context) {
 	var req RestartRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Debug("API restart request - invalid JSON from %s", c.ClientIP())
 		c.JSON(http.StatusBadRequest, RestartResponse{
 			Success: false,
 			Message: "Invalid request format",
@@ -383,7 +486,10 @@ func (m *DDNSMonitor) handleRestart(c *gin.Context) {
 		return
 	}
 	
+	logger.Info("API restart request for interface '%s' from %s", req.Interface, c.ClientIP())
+	
 	if m.singleInterface != "" && req.Interface != m.singleInterface {
+		logger.Warn("API restart request denied - interface '%s' not allowed (single-interface mode: %s)", req.Interface, m.singleInterface)
 		c.JSON(http.StatusBadRequest, RestartResponse{
 			Success: false,
 			Message: fmt.Sprintf("Only interface '%s' is monitored", m.singleInterface),
@@ -400,6 +506,7 @@ func (m *DDNSMonitor) handleRestart(c *gin.Context) {
 	}
 	
 	if !found {
+		logger.Warn("API restart request denied - interface '%s' not found in monitored interfaces", req.Interface)
 		c.JSON(http.StatusNotFound, RestartResponse{
 			Success: false,
 			Message: fmt.Sprintf("Interface '%s' not found in monitored interfaces", req.Interface),
@@ -408,6 +515,7 @@ func (m *DDNSMonitor) handleRestart(c *gin.Context) {
 	}
 	
 	if err := m.restartWireGuardService(req.Interface); err != nil {
+		logger.Error("API restart request failed for interface '%s': %v", req.Interface, err)
 		c.JSON(http.StatusInternalServerError, RestartResponse{
 			Success: false,
 			Message: fmt.Sprintf("Failed to restart interface: %v", err),
@@ -415,6 +523,7 @@ func (m *DDNSMonitor) handleRestart(c *gin.Context) {
 		return
 	}
 	
+	logger.Info("API restart request completed successfully for interface '%s'", req.Interface)
 	c.JSON(http.StatusOK, RestartResponse{
 		Success: true,
 		Message: fmt.Sprintf("Interface '%s' restarted successfully", req.Interface),
@@ -430,6 +539,8 @@ func (m *DDNSMonitor) handleRestart(c *gin.Context) {
 // @Failure 401 {object} map[string]interface{}
 // @Router /interfaces [get]
 func (m *DDNSMonitor) handleListInterfaces(c *gin.Context) {
+	logger.Debug("API interfaces request from %s", c.ClientIP())
+	
 	interfaces := make([]map[string]interface{}, 0, len(m.configs))
 	for _, config := range m.configs {
 		interfaces = append(interfaces, map[string]interface{}{
@@ -457,10 +568,12 @@ func (m *DDNSMonitor) run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("Shutting down monitor")
+			logger.Info("Shutting down monitor")
 			return
 		case <-ticker.C:
+			logger.Debug("Starting scheduled endpoint check")
 			m.checkEndpoints()
+			logger.Debug("Completed scheduled endpoint check")
 		}
 	}
 }
