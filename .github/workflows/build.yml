@@ -3,9 +3,19 @@ name: Build Linux Binaries
 on:
   push:
     branches: [ master ]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/**'
     tags: [ 'v*' ]
   pull_request:
     branches: [ master ]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/**'
 
 permissions:
   contents: write
