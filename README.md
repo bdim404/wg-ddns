@@ -14,7 +14,7 @@ A lightweight tool that provides DDNS dynamic DNS support for WireGuard.
 - [x] Header-based API authentication;
 - [x] Swagger documentation support for API;
 - [x] Rich logging output with INFO, DEBUG levels;
-- [ ] Environment variable support;
+- [x] Environment variable support;
 - [ ] Provide systemd service template;
 - [ ] Package and deploy via Nix.
 
@@ -28,6 +28,19 @@ A lightweight tool that provides DDNS dynamic DNS support for WireGuard.
 - `--check-interval`: DNS resolution check interval, supports time units like `s`, `m`, `h`, default: `10s`;
 - `--version`: Show version information;
 - `--help`: Show help information.
+
+## Environment Variables
+
+In addition to command line parameters, all configuration options support environment variables:
+
+- `WG_DDNS_SINGLE_INTERFACE`: Corresponds to `--single-interface`
+- `WG_DDNS_LISTEN_ADDRESS`: Corresponds to `--listen-address`
+- `WG_DDNS_LISTEN_PORT`: Corresponds to `--listen-port`
+- `WG_DDNS_API_KEY`: Corresponds to `--api-key`
+- `WG_DDNS_LOG_LEVEL`: Corresponds to `--log-level`
+- `WG_DDNS_CHECK_INTERVAL`: Corresponds to `--check-interval`
+
+**Note**: Command line parameters take precedence over environment variables.
 
 ## Usage Examples
 

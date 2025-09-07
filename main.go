@@ -20,11 +20,11 @@ import (
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
-	
+
 	_ "github.com/fernvenue/wg-ddns/docs"
 )
 
-const Version = "1.0"
+const Version = "1.1"
 
 type LogLevel int
 
@@ -50,7 +50,7 @@ func (l *Logger) log(level LogLevel, format string, args ...interface{}) {
 	if level < l.level {
 		return
 	}
-	
+
 	timestamp := time.Now().Format("2006/01/02 15:04:05")
 	levelName := logLevelNames[level]
 	message := fmt.Sprintf(format, args...)
@@ -131,10 +131,17 @@ type Args struct {
 
 func parseArgs() *Args {
 	args := &Args{}
-	
+
+	args.singleInterface = os.Getenv("WG_DDNS_SINGLE_INTERFACE")
+	args.listenAddress = os.Getenv("WG_DDNS_LISTEN_ADDRESS")
+	args.listenPort = os.Getenv("WG_DDNS_LISTEN_PORT")
+	args.apiKey = os.Getenv("WG_DDNS_API_KEY")
+	args.logLevel = os.Getenv("WG_DDNS_LOG_LEVEL")
+	args.checkInterval = os.Getenv("WG_DDNS_CHECK_INTERVAL")
+
 	for i := 1; i < len(os.Args); i++ {
 		arg := os.Args[i]
-		
+
 		if !strings.HasPrefix(arg, "--") {
 			if arg == "-h" || arg == "-help" {
 				args.help = true
@@ -143,20 +150,20 @@ func parseArgs() *Args {
 			fmt.Fprintf(os.Stderr, "Error: Invalid argument format '%s'. Only double-dash (--) options are supported.\n", arg)
 			os.Exit(1)
 		}
-		
+
 		if arg == "--help" {
 			args.help = true
 			continue
 		}
-		
+
 		if arg == "--version" {
 			args.version = true
 			continue
 		}
-		
+
 		parts := strings.SplitN(arg, "=", 2)
 		var key, value string
-		
+
 		if len(parts) == 2 {
 			key = parts[0]
 			value = parts[1]
@@ -167,7 +174,7 @@ func parseArgs() *Args {
 				value = os.Args[i]
 			}
 		}
-		
+
 		switch key {
 		case "--single-interface":
 			args.singleInterface = value
@@ -186,7 +193,7 @@ func parseArgs() *Args {
 			os.Exit(1)
 		}
 	}
-	
+
 	return args
 }
 
@@ -202,8 +209,17 @@ func printUsage() {
 	fmt.Println("  --version                    Show version information")
 	fmt.Println("  --help                       Show this help message")
 	fmt.Println("")
+	fmt.Println("ENVIRONMENT VARIABLES:")
+	fmt.Println("  WG_DDNS_SINGLE_INTERFACE     Same as --single-interface")
+	fmt.Println("  WG_DDNS_LISTEN_ADDRESS       Same as --listen-address")
+	fmt.Println("  WG_DDNS_LISTEN_PORT          Same as --listen-port")
+	fmt.Println("  WG_DDNS_API_KEY              Same as --api-key")
+	fmt.Println("  WG_DDNS_LOG_LEVEL            Same as --log-level")
+	fmt.Println("  WG_DDNS_CHECK_INTERVAL       Same as --check-interval")
+	fmt.Println("")
 	fmt.Println("NOTES:")
 	fmt.Println("  - All three API options (--listen-address, --listen-port, --api-key) must be provided together to enable API functionality")
+	fmt.Println("  - Command line options override environment variables")
 	fmt.Println("  - Use double-dash (--) format for all options")
 }
 
@@ -221,12 +237,12 @@ func printVersion() {
 // @name X-API-Key
 func main() {
 	args := parseArgs()
-	
+
 	if args.help {
 		printUsage()
 		os.Exit(0)
 	}
-	
+
 	if args.version {
 		printVersion()
 		os.Exit(0)
@@ -236,9 +252,9 @@ func main() {
 	if args.logLevel != "" {
 		logLevel = parseLogLevel(args.logLevel)
 	}
-	
+
 	logger = &Logger{level: logLevel}
-	
+
 	log.SetOutput(io.Discard)
 	gin.DefaultWriter = io.Discard
 	gin.DefaultErrorWriter = io.Discard
@@ -267,7 +283,7 @@ func main() {
 		apiKey:          args.apiKey,
 		checkInterval:   checkInterval,
 	}
-	
+
 	if err := monitor.initialize(); err != nil {
 		logger.Error("Failed to initialize monitor: %v", err)
 		os.Exit(1)
@@ -312,7 +328,7 @@ func (m *DDNSMonitor) parseSingleInterface() error {
 	if err := m.parseWireGuardConfig(m.singleInterface, configPath); err != nil {
 		return fmt.Errorf("failed to parse config for %s: %w", m.singleInterface, err)
 	}
-	
+
 	logger.Info("Monitoring single interface: %s with %d domain endpoints", m.singleInterface, len(m.configs))
 	return nil
 }
@@ -338,7 +354,7 @@ func (m *DDNSMonitor) discoverWireGuardConfigs() error {
 		if strings.HasPrefix(unit.Name, "wg-quick@") && strings.HasSuffix(unit.Name, ".service") && unit.ActiveState == "active" {
 			interfaceName := strings.TrimPrefix(unit.Name, "wg-quick@")
 			interfaceName = strings.TrimSuffix(interfaceName, ".service")
-			
+
 			configPath := filepath.Join("/etc/wireguard", interfaceName+".conf")
 			if err := m.parseWireGuardConfig(interfaceName, configPath); err != nil {
 				logger.Warn("Failed to parse config for %s: %v", interfaceName, err)
@@ -367,7 +383,7 @@ func (m *DDNSMonitor) parseWireGuardConfig(interfaceName, configPath string) err
 		matches := endpointRegex.FindStringSubmatch(line)
 		if len(matches) == 2 {
 			endpoint := strings.TrimSpace(matches[1])
-			
+
 			host, _, err := net.SplitHostPort(endpoint)
 			if err != nil {
 				continue
@@ -379,11 +395,11 @@ func (m *DDNSMonitor) parseWireGuardConfig(interfaceName, configPath string) err
 					Endpoint:  endpoint,
 					Hostname:  host,
 				}
-				
+
 				if ip, err := net.ResolveIPAddr("ip4", host); err == nil {
 					config.LastIP = ip.IP
 				}
-				
+
 				m.configs = append(m.configs, config)
 				logger.Debug("Found domain endpoint: %s -> %s (interface: %s)", host, config.LastIP, interfaceName)
 			}
@@ -396,7 +412,7 @@ func (m *DDNSMonitor) parseWireGuardConfig(interfaceName, configPath string) err
 func (m *DDNSMonitor) checkEndpoints() {
 	for i := range m.configs {
 		config := &m.configs[i]
-		
+
 		logger.Debug("Resolving DNS for %s (interface: %s)", config.Hostname, config.Interface)
 		currentIP, err := net.ResolveIPAddr("ip4", config.Hostname)
 		if err != nil {
@@ -407,11 +423,11 @@ func (m *DDNSMonitor) checkEndpoints() {
 		logger.Debug("DNS resolution result for %s: %s (interface: %s)", config.Hostname, currentIP.IP, config.Interface)
 
 		if !config.LastIP.Equal(currentIP.IP) {
-			logger.Warn("IP change detected for %s: %s -> %s (interface: %s)", 
+			logger.Warn("IP change detected for %s: %s -> %s (interface: %s)",
 				config.Hostname, config.LastIP, currentIP.IP, config.Interface)
-			
+
 			config.LastIP = currentIP.IP
-			
+
 			if err := m.restartWireGuardService(config.Interface); err != nil {
 				logger.Error("Failed to restart wg-quick@%s: %v", config.Interface, err)
 			} else {
@@ -423,7 +439,7 @@ func (m *DDNSMonitor) checkEndpoints() {
 
 func (m *DDNSMonitor) restartWireGuardService(interfaceName string) error {
 	serviceName := fmt.Sprintf("wg-quick@%s.service", interfaceName)
-	
+
 	reschan := make(chan string)
 	_, err := m.conn.RestartUnitContext(context.Background(), serviceName, "replace", reschan)
 	if err != nil {
@@ -443,46 +459,46 @@ func (m *DDNSMonitor) startHTTPServer(ctx context.Context) {
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.Use(m.loggingMiddleware())
-	
+
 	v1 := router.Group("/api/v1")
 	v1.Use(m.authMiddleware())
 	{
 		v1.POST("/restart", m.handleRestart)
 		v1.GET("/interfaces", m.handleListInterfaces)
 	}
-	
+
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
-	
+
 	addr := fmt.Sprintf("%s:%s", m.listenAddress, m.listenPort)
 	m.httpServer = &http.Server{
 		Addr:    addr,
 		Handler: router,
 	}
-	
+
 	logger.Info("HTTP API server started on %s", addr)
 	logger.Info("Swagger UI available at http://%s/swagger/index.html", addr)
-	
+
 	go func() {
 		if err := m.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("HTTP server error: %v", err)
 		}
 	}()
-	
+
 	<-ctx.Done()
 }
 
 func (m *DDNSMonitor) loggingMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
-		
+
 		c.Next()
-		
+
 		duration := time.Since(start)
 		clientIP := c.ClientIP()
 		method := c.Request.Method
 		path := c.Request.URL.Path
 		statusCode := c.Writer.Status()
-		
+
 		logger.Info("API %s %s - %d - %v - %s", method, path, statusCode, duration, clientIP)
 	}
 }
@@ -523,9 +539,9 @@ func (m *DDNSMonitor) handleRestart(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	logger.Info("API restart request for interface '%s' from %s", req.Interface, c.ClientIP())
-	
+
 	if m.singleInterface != "" && req.Interface != m.singleInterface {
 		logger.Warn("API restart request denied - interface '%s' not allowed (single-interface mode: %s)", req.Interface, m.singleInterface)
 		c.JSON(http.StatusBadRequest, RestartResponse{
@@ -534,7 +550,7 @@ func (m *DDNSMonitor) handleRestart(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	found := false
 	for _, config := range m.configs {
 		if config.Interface == req.Interface {
@@ -542,7 +558,7 @@ func (m *DDNSMonitor) handleRestart(c *gin.Context) {
 			break
 		}
 	}
-	
+
 	if !found {
 		logger.Warn("API restart request denied - interface '%s' not found in monitored interfaces", req.Interface)
 		c.JSON(http.StatusNotFound, RestartResponse{
@@ -551,7 +567,7 @@ func (m *DDNSMonitor) handleRestart(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	if err := m.restartWireGuardService(req.Interface); err != nil {
 		logger.Error("API restart request failed for interface '%s': %v", req.Interface, err)
 		c.JSON(http.StatusInternalServerError, RestartResponse{
@@ -560,7 +576,7 @@ func (m *DDNSMonitor) handleRestart(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	logger.Info("API restart request completed successfully for interface '%s'", req.Interface)
 	c.JSON(http.StatusOK, RestartResponse{
 		Success: true,
@@ -578,7 +594,7 @@ func (m *DDNSMonitor) handleRestart(c *gin.Context) {
 // @Router /interfaces [get]
 func (m *DDNSMonitor) handleListInterfaces(c *gin.Context) {
 	logger.Debug("API interfaces request from %s", c.ClientIP())
-	
+
 	interfaces := make([]map[string]interface{}, 0, len(m.configs))
 	for _, config := range m.configs {
 		interfaces = append(interfaces, map[string]interface{}{
@@ -588,14 +604,14 @@ func (m *DDNSMonitor) handleListInterfaces(c *gin.Context) {
 			"last_ip":   config.LastIP.String(),
 		})
 	}
-	
+
 	response := map[string]interface{}{
 		"single_interface_mode": m.singleInterface != "",
 		"monitored_interface":   m.singleInterface,
-		"interfaces":           interfaces,
-		"total_count":          len(interfaces),
+		"interfaces":            interfaces,
+		"total_count":           len(interfaces),
 	}
-	
+
 	c.JSON(http.StatusOK, response)
 }
 
