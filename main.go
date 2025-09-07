@@ -3,10 +3,10 @@ package main
 import (
 	"bufio"
 	"context"
-	"flag"
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -16,6 +16,11 @@ import (
 	"time"
 
 	"github.com/coreos/go-systemd/v22/dbus"
+	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
+	
+	_ "github.com/fernvenue/wg-ddns/docs"
 )
 
 type Config struct {
@@ -29,14 +34,120 @@ type DDNSMonitor struct {
 	configs         []Config
 	conn            *dbus.Conn
 	singleInterface string
+	apiEnabled      bool
+	listenAddress   string
+	listenPort      string
+	apiKey          string
+	httpServer      *http.Server
 }
 
+type RestartRequest struct {
+	Interface string `json:"interface" binding:"required"`
+}
+
+type RestartResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}
+
+type Args struct {
+	singleInterface string
+	listenAddress   string
+	listenPort      string
+	apiKey          string
+	help            bool
+}
+
+func parseArgs() *Args {
+	args := &Args{}
+	
+	for i := 1; i < len(os.Args); i++ {
+		arg := os.Args[i]
+		
+		if !strings.HasPrefix(arg, "--") {
+			if arg == "-h" || arg == "-help" {
+				args.help = true
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "Error: Invalid argument format '%s'. Only double-dash (--) options are supported.\n", arg)
+			os.Exit(1)
+		}
+		
+		if arg == "--help" {
+			args.help = true
+			continue
+		}
+		
+		parts := strings.SplitN(arg, "=", 2)
+		var key, value string
+		
+		if len(parts) == 2 {
+			key = parts[0]
+			value = parts[1]
+		} else {
+			key = arg
+			if i+1 < len(os.Args) && !strings.HasPrefix(os.Args[i+1], "--") {
+				i++
+				value = os.Args[i]
+			}
+		}
+		
+		switch key {
+		case "--single-interface":
+			args.singleInterface = value
+		case "--listen-address":
+			args.listenAddress = value
+		case "--listen-port":
+			args.listenPort = value
+		case "--api-key":
+			args.apiKey = value
+		default:
+			fmt.Fprintf(os.Stderr, "Error: Unknown option '%s'\n", key)
+			os.Exit(1)
+		}
+	}
+	
+	return args
+}
+
+func printUsage() {
+	fmt.Printf("Usage: %s [OPTIONS]\n\n", os.Args[0])
+	fmt.Println("OPTIONS:")
+	fmt.Println("  --single-interface string    Monitor only the specified WireGuard interface")
+	fmt.Println("  --listen-address string      HTTP API listen address")
+	fmt.Println("  --listen-port string         HTTP API listen port")
+	fmt.Println("  --api-key string             API key for authentication")
+	fmt.Println("  --help                       Show this help message")
+	fmt.Println("")
+	fmt.Println("NOTES:")
+	fmt.Println("  - All three API options (--listen-address, --listen-port, --api-key) must be provided together to enable API functionality")
+	fmt.Println("  - Use double-dash (--) format for all options")
+}
+
+// @title WireGuard DDNS API
+// @version 1.0
+// @description API for WireGuard DDNS monitor
+// @host localhost:8080
+// @BasePath /api/v1
+// @securityDefinitions.apikey ApiKeyAuth
+// @in header
+// @name X-API-Key
 func main() {
-	var singleInterface = flag.String("single-interface", "", "Monitor only the specified WireGuard interface")
-	flag.Parse()
+	args := parseArgs()
+	
+	if args.help {
+		printUsage()
+		os.Exit(0)
+	}
+
+	apiEnabled := args.listenAddress != "" && args.listenPort != "" && args.apiKey != ""
 
 	monitor := &DDNSMonitor{
-		singleInterface: *singleInterface,
+		singleInterface: args.singleInterface,
+		apiEnabled:      apiEnabled,
+		listenAddress:   args.listenAddress,
+		listenPort:      args.listenPort,
+		apiKey:          args.apiKey,
 	}
 	
 	if err := monitor.initialize(); err != nil {
@@ -55,6 +166,10 @@ func main() {
 		log.Println("Received shutdown signal")
 		cancel()
 	}()
+
+	if monitor.apiEnabled {
+		go monitor.startHTTPServer(ctx)
+	}
 
 	log.Println("WireGuard DDNS monitor started")
 	monitor.run(ctx)
@@ -84,6 +199,11 @@ func (m *DDNSMonitor) parseSingleInterface() error {
 }
 
 func (m *DDNSMonitor) cleanup() {
+	if m.httpServer != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		m.httpServer.Shutdown(shutdownCtx)
+	}
 	if m.conn != nil {
 		m.conn.Close()
 	}
@@ -194,6 +314,140 @@ func (m *DDNSMonitor) restartWireGuardService(interfaceName string) error {
 	}
 
 	return nil
+}
+
+func (m *DDNSMonitor) startHTTPServer(ctx context.Context) {
+	gin.SetMode(gin.ReleaseMode)
+	router := gin.New()
+	router.Use(gin.Recovery())
+	
+	v1 := router.Group("/api/v1")
+	v1.Use(m.authMiddleware())
+	{
+		v1.POST("/restart", m.handleRestart)
+		v1.GET("/interfaces", m.handleListInterfaces)
+	}
+	
+	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	
+	addr := fmt.Sprintf("%s:%s", m.listenAddress, m.listenPort)
+	m.httpServer = &http.Server{
+		Addr:    addr,
+		Handler: router,
+	}
+	
+	log.Printf("HTTP API server started on %s", addr)
+	log.Printf("Swagger UI available at http://%s/swagger/index.html", addr)
+	
+	go func() {
+		if err := m.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("HTTP server error: %v", err)
+		}
+	}()
+	
+	<-ctx.Done()
+}
+
+func (m *DDNSMonitor) authMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		apiKey := c.GetHeader("X-API-Key")
+		if apiKey != m.apiKey {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid API key"})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+// @Summary Restart WireGuard interface
+// @Description Restart a specific WireGuard interface
+// @Tags interfaces
+// @Accept json
+// @Produce json
+// @Param X-API-Key header string true "API Key"
+// @Param request body RestartRequest true "Interface to restart"
+// @Success 200 {object} RestartResponse
+// @Failure 400 {object} RestartResponse
+// @Failure 401 {object} RestartResponse
+// @Failure 404 {object} RestartResponse
+// @Failure 500 {object} RestartResponse
+// @Router /restart [post]
+func (m *DDNSMonitor) handleRestart(c *gin.Context) {
+	var req RestartRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, RestartResponse{
+			Success: false,
+			Message: "Invalid request format",
+		})
+		return
+	}
+	
+	if m.singleInterface != "" && req.Interface != m.singleInterface {
+		c.JSON(http.StatusBadRequest, RestartResponse{
+			Success: false,
+			Message: fmt.Sprintf("Only interface '%s' is monitored", m.singleInterface),
+		})
+		return
+	}
+	
+	found := false
+	for _, config := range m.configs {
+		if config.Interface == req.Interface {
+			found = true
+			break
+		}
+	}
+	
+	if !found {
+		c.JSON(http.StatusNotFound, RestartResponse{
+			Success: false,
+			Message: fmt.Sprintf("Interface '%s' not found in monitored interfaces", req.Interface),
+		})
+		return
+	}
+	
+	if err := m.restartWireGuardService(req.Interface); err != nil {
+		c.JSON(http.StatusInternalServerError, RestartResponse{
+			Success: false,
+			Message: fmt.Sprintf("Failed to restart interface: %v", err),
+		})
+		return
+	}
+	
+	c.JSON(http.StatusOK, RestartResponse{
+		Success: true,
+		Message: fmt.Sprintf("Interface '%s' restarted successfully", req.Interface),
+	})
+}
+
+// @Summary List monitored interfaces
+// @Description Get list of all monitored WireGuard interfaces
+// @Tags interfaces
+// @Produce json
+// @Param X-API-Key header string true "API Key"
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /interfaces [get]
+func (m *DDNSMonitor) handleListInterfaces(c *gin.Context) {
+	interfaces := make([]map[string]interface{}, 0, len(m.configs))
+	for _, config := range m.configs {
+		interfaces = append(interfaces, map[string]interface{}{
+			"interface": config.Interface,
+			"endpoint":  config.Endpoint,
+			"hostname":  config.Hostname,
+			"last_ip":   config.LastIP.String(),
+		})
+	}
+	
+	response := map[string]interface{}{
+		"single_interface_mode": m.singleInterface != "",
+		"monitored_interface":   m.singleInterface,
+		"interfaces":           interfaces,
+		"total_count":          len(interfaces),
+	}
+	
+	c.JSON(http.StatusOK, response)
 }
 
 func (m *DDNSMonitor) run(ctx context.Context) {
