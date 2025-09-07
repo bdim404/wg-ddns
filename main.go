@@ -24,6 +24,8 @@ import (
 	_ "github.com/fernvenue/wg-ddns/docs"
 )
 
+const Version = "1.0"
+
 type LogLevel int
 
 const (
@@ -124,6 +126,7 @@ type Args struct {
 	logLevel        string
 	checkInterval   string
 	help            bool
+	version         bool
 }
 
 func parseArgs() *Args {
@@ -143,6 +146,11 @@ func parseArgs() *Args {
 		
 		if arg == "--help" {
 			args.help = true
+			continue
+		}
+		
+		if arg == "--version" {
+			args.version = true
 			continue
 		}
 		
@@ -191,11 +199,16 @@ func printUsage() {
 	fmt.Println("  --api-key string             API key for authentication")
 	fmt.Println("  --log-level string           Log level: debug, info, warn, error (default: info)")
 	fmt.Println("  --check-interval string      DNS check interval (e.g., 10s, 1m, 5m) (default: 10s)")
+	fmt.Println("  --version                    Show version information")
 	fmt.Println("  --help                       Show this help message")
 	fmt.Println("")
 	fmt.Println("NOTES:")
 	fmt.Println("  - All three API options (--listen-address, --listen-port, --api-key) must be provided together to enable API functionality")
 	fmt.Println("  - Use double-dash (--) format for all options")
+}
+
+func printVersion() {
+	fmt.Printf("wg-ddns version %s\n", Version)
 }
 
 // @title WireGuard DDNS API
@@ -211,6 +224,11 @@ func main() {
 	
 	if args.help {
 		printUsage()
+		os.Exit(0)
+	}
+	
+	if args.version {
+		printVersion()
 		os.Exit(0)
 	}
 

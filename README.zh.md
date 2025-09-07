@@ -1,5 +1,8 @@
 # WireGuard DDNS
 
+[![wg-ddns](https://img.shields.io/badge/LICENSE-GPLv3%20Liscense-blue?style=flat-square)](./LICENSE)
+[![wg-ddns](https://img.shields.io/badge/GitHub-WireGuard%20DDNS-blueviolet?style=flat-square&logo=github)](https://github.com/fernvenue/wg-ddns)
+
 為 WireGuard 提供 DDNS 動態域名解析支持的輕量級工具.
 
 ## 功能
@@ -13,17 +16,18 @@
 - [x] 豐富的日志輸出, 支持 INFO, DEBUG 等級別;
 - [ ] 環境變量支持;
 - [ ] 提供 systemd service 模板;
-- [ ] 通過 Nix 進行打包和部署;
+- [ ] 通過 Nix 進行打包和部署.
 
 ## 參數說明
 
 - `--single-interface`: 指定單一的 WireGuard 接口進行監控, 如果不指定則自動發現所有活躍接口;
 - `--listen-address`: 啟用 API 服務時的監聽地址, 支持 IPv4 和 IPv6 地址;
 - `--listen-port`: 啟用 API 服務時的監聽端口;
-- `--api-key`: 啟用 API 服務時的身份認證密鑰,
+- `--api-key`: 啟用 API 服務時的身份認證密鑰;
 - `--log-level`: 日志輸出等級, 可選值為 `debug`, `info`, `warn`, `error`, 默認值為 `info`;
 - `--check-interval`: DNS 解析檢查間隔, 支持時間單位如 `s`, `m`, `h`, 默認值為 `10s`;
-- `--help`: 顯示幫助信息;
+- `--version`: 顯示版本信息;
+- `--help`: 顯示幫助信息.
 
 ## 使用示例
 
