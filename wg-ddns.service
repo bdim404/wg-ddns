@@ -1,0 +1,14 @@
+[Unit]
+Description=WireGuard DDNS Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/wg-ddns
+Restart=always
+RestartSec=5
+Environment=WG_DDNS_LOG_LEVEL=info
+
+[Install]
+WantedBy=multi-user.target
