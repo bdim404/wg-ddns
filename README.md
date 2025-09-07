@@ -5,6 +5,8 @@
 
 A lightweight tool that provides DDNS dynamic DNS support for WireGuard.
 
+[中文說明](./README.zh.md)
+
 ## Features
 
 - [x] Auto-discover active WireGuard interfaces and check `wg-quick` configurations;
