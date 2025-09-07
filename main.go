@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -25,12 +26,18 @@ type Config struct {
 }
 
 type DDNSMonitor struct {
-	configs []Config
-	conn    *dbus.Conn
+	configs         []Config
+	conn            *dbus.Conn
+	singleInterface string
 }
 
 func main() {
-	monitor := &DDNSMonitor{}
+	var singleInterface = flag.String("single-interface", "", "Monitor only the specified WireGuard interface")
+	flag.Parse()
+
+	monitor := &DDNSMonitor{
+		singleInterface: *singleInterface,
+	}
 	
 	if err := monitor.initialize(); err != nil {
 		log.Fatalf("Failed to initialize monitor: %v", err)
@@ -55,12 +62,25 @@ func main() {
 
 func (m *DDNSMonitor) initialize() error {
 	var err error
-	m.conn, err = dbus.New()
+	m.conn, err = dbus.NewWithContext(context.Background())
 	if err != nil {
 		return fmt.Errorf("failed to connect to systemd: %w", err)
 	}
 
+	if m.singleInterface != "" {
+		return m.parseSingleInterface()
+	}
 	return m.discoverWireGuardConfigs()
+}
+
+func (m *DDNSMonitor) parseSingleInterface() error {
+	configPath := filepath.Join("/etc/wireguard", m.singleInterface+".conf")
+	if err := m.parseWireGuardConfig(m.singleInterface, configPath); err != nil {
+		return fmt.Errorf("failed to parse config for %s: %w", m.singleInterface, err)
+	}
+	
+	log.Printf("Monitoring single interface: %s with %d domain endpoints", m.singleInterface, len(m.configs))
+	return nil
 }
 
 func (m *DDNSMonitor) cleanup() {
@@ -70,7 +90,7 @@ func (m *DDNSMonitor) cleanup() {
 }
 
 func (m *DDNSMonitor) discoverWireGuardConfigs() error {
-	units, err := m.conn.ListUnits()
+	units, err := m.conn.ListUnitsContext(context.Background())
 	if err != nil {
 		return fmt.Errorf("failed to list systemd units: %w", err)
 	}
@@ -163,7 +183,7 @@ func (m *DDNSMonitor) restartWireGuardService(interfaceName string) error {
 	serviceName := fmt.Sprintf("wg-quick@%s.service", interfaceName)
 	
 	reschan := make(chan string)
-	_, err := m.conn.RestartUnit(serviceName, "replace", reschan)
+	_, err := m.conn.RestartUnitContext(context.Background(), serviceName, "replace", reschan)
 	if err != nil {
 		return fmt.Errorf("failed to restart service %s: %w", serviceName, err)
 	}
