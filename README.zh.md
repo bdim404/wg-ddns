@@ -15,7 +15,7 @@
 - [x] API 接口提供 Swagger 文檔支援;
 - [x] 豐富的日志輸出, 支援 INFO, DEBUG 等級別;
 - [x] 環境變量支援;
-- [ ] 提供 systemd service 模板;
+- [x] 提供 systemd service 模板;
 - [ ] 通過 Nix 進行打包和部署.
 
 ## 參數說明

@@ -15,7 +15,7 @@ A lightweight tool that provides DDNS dynamic DNS support for WireGuard.
 - [x] Swagger documentation support for API;
 - [x] Rich logging output with INFO, DEBUG levels;
 - [x] Environment variable support;
-- [ ] Provide systemd service template;
+- [x] Provide systemd service template;
 - [ ] Package and deploy via Nix.
 
 ## Parameters
