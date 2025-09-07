@@ -24,7 +24,7 @@ import (
 	_ "github.com/fernvenue/wg-ddns/docs"
 )
 
-const Version = "1.1"
+const Version = "1.2"
 
 type LogLevel int
 
@@ -127,6 +127,7 @@ type Args struct {
 	checkInterval   string
 	help            bool
 	version         bool
+	checkOnly       bool
 }
 
 func parseArgs() *Args {
@@ -158,6 +159,11 @@ func parseArgs() *Args {
 
 		if arg == "--version" {
 			args.version = true
+			continue
+		}
+
+		if arg == "--check-only" {
+			args.checkOnly = true
 			continue
 		}
 
@@ -206,6 +212,7 @@ func printUsage() {
 	fmt.Println("  --api-key string             API key for authentication")
 	fmt.Println("  --log-level string           Log level: debug, info, warn, error (default: info)")
 	fmt.Println("  --check-interval string      DNS check interval (e.g., 10s, 1m, 5m) (default: 10s)")
+	fmt.Println("  --check-only                 Check active WireGuard interfaces and exit")
 	fmt.Println("  --version                    Show version information")
 	fmt.Println("  --help                       Show this help message")
 	fmt.Println("")
@@ -227,6 +234,113 @@ func printVersion() {
 	fmt.Printf("wg-ddns version %s\n", Version)
 }
 
+func performCheckOnly(singleInterface string) {
+	conn, err := dbus.NewWithContext(context.Background())
+	if err != nil {
+		fmt.Printf("Error: Failed to connect to systemd: %v\n", err)
+		os.Exit(1)
+	}
+	defer conn.Close()
+
+	var configs []Config
+	
+	if singleInterface != "" {
+		configPath := filepath.Join("/etc/wireguard", singleInterface+".conf")
+		if err := parseWireGuardConfigForCheck(singleInterface, configPath, &configs); err != nil {
+			fmt.Printf("Error: Failed to parse config for %s: %v\n", singleInterface, err)
+			os.Exit(1)
+		}
+		fmt.Printf("Checking single interface: %s\n", singleInterface)
+	} else {
+		if err := discoverWireGuardConfigsForCheck(conn, &configs); err != nil {
+			fmt.Printf("Error: Failed to discover WireGuard interfaces: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Scanning all active WireGuard interfaces...\n")
+	}
+
+	if len(configs) == 0 {
+		fmt.Println("No active WireGuard interfaces with domain endpoints found.")
+		return
+	}
+
+	fmt.Printf("\nFound %d active WireGuard interface(s) with domain endpoints:\n\n", len(configs))
+	
+	for i, config := range configs {
+		fmt.Printf("%d. Interface: %s\n", i+1, config.Interface)
+		fmt.Printf("   Endpoint: %s\n", config.Endpoint)
+		fmt.Printf("   Hostname: %s\n", config.Hostname)
+		if config.LastIP != nil {
+			fmt.Printf("   Current IP: %s\n", config.LastIP)
+		} else {
+			fmt.Printf("   Current IP: (failed to resolve)\n")
+		}
+		fmt.Println()
+	}
+}
+
+func discoverWireGuardConfigsForCheck(conn *dbus.Conn, configs *[]Config) error {
+	units, err := conn.ListUnitsContext(context.Background())
+	if err != nil {
+		return fmt.Errorf("failed to list systemd units: %w", err)
+	}
+
+	for _, unit := range units {
+		if strings.HasPrefix(unit.Name, "wg-quick@") && strings.HasSuffix(unit.Name, ".service") && unit.ActiveState == "active" {
+			interfaceName := strings.TrimPrefix(unit.Name, "wg-quick@")
+			interfaceName = strings.TrimSuffix(interfaceName, ".service")
+
+			configPath := filepath.Join("/etc/wireguard", interfaceName+".conf")
+			if err := parseWireGuardConfigForCheck(interfaceName, configPath, configs); err != nil {
+				continue
+			}
+		}
+	}
+
+	return nil
+}
+
+func parseWireGuardConfigForCheck(interfaceName, configPath string, configs *[]Config) error {
+	file, err := os.Open(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to open config file %s: %w", configPath, err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	endpointRegex := regexp.MustCompile(`^\s*Endpoint\s*=\s*(.+)$`)
+	ipRegex := regexp.MustCompile(`^\d+\.\d+\.\d+\.\d+`)
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		matches := endpointRegex.FindStringSubmatch(line)
+		if len(matches) == 2 {
+			endpoint := strings.TrimSpace(matches[1])
+
+			host, _, err := net.SplitHostPort(endpoint)
+			if err != nil {
+				continue
+			}
+
+			if !ipRegex.MatchString(host) {
+				config := Config{
+					Interface: interfaceName,
+					Endpoint:  endpoint,
+					Hostname:  host,
+				}
+
+				if ip, err := net.ResolveIPAddr("ip4", host); err == nil {
+					config.LastIP = ip.IP
+				}
+
+				*configs = append(*configs, config)
+			}
+		}
+	}
+
+	return scanner.Err()
+}
+
 // @title WireGuard DDNS API
 // @version 1.0
 // @description API for WireGuard DDNS monitor
@@ -245,6 +359,11 @@ func main() {
 
 	if args.version {
 		printVersion()
+		os.Exit(0)
+	}
+
+	if args.checkOnly {
+		performCheckOnly(args.singleInterface)
 		os.Exit(0)
 	}
 

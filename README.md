@@ -26,6 +26,7 @@ A lightweight tool that provides DDNS dynamic DNS support for WireGuard.
 - `--api-key`: Authentication key for API service;
 - `--log-level`: Log output level, options: `debug`, `info`, `warn`, `error`, default: `info`;
 - `--check-interval`: DNS resolution check interval, supports time units like `s`, `m`, `h`, default: `10s`;
+- `--check-only`: Check active WireGuard interfaces and exit (does not start monitoring);
 - `--version`: Show version information;
 - `--help`: Show help information.
 
@@ -78,4 +79,16 @@ wg-ddns --listen-address "[::1]" --listen-port 8080 --api-key "your_api_key"
 
 ```
 wg-ddns --single-interface wg0 --listen-address "[::1]" --listen-port 8080 --api-key "your_api_key"
+```
+
+- Quick check of active interfaces
+
+```
+wg-ddns --check-only
+```
+
+- Check specific interface
+
+```
+wg-ddns --check-only --single-interface wg0
 ```

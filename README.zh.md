@@ -26,6 +26,7 @@
 - `--api-key`: 啟用 API 服務時的身份認證密鑰;
 - `--log-level`: 日志輸出等級, 可選值為 `debug`, `info`, `warn`, `error`, 默認值為 `info`;
 - `--check-interval`: DNS 解析檢查間隔, 支援時間單位如 `s`, `m`, `h`, 默認值為 `10s`;
+- `--check-only`: 檢查活躍的 WireGuard 接口並退出 (不啟動監控);
 - `--version`: 顯示版本信息;
 - `--help`: 顯示幫助信息.
 
@@ -78,4 +79,16 @@ wg-ddns --listen-address "[::1]" --listen-port 8080 --api-key "your_api_key"
 
 ```
 wg-ddns --single-interface wg0 --listen-address "[::1]" --listen-port 8080 --api-key "your_api_key"
+```
+
+- 快速檢查活躍接口
+
+```
+wg-ddns --check-only
+```
+
+- 檢查指定接口
+
+```
+wg-ddns --check-only --single-interface wg0
 ```
