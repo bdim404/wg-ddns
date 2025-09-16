@@ -22,6 +22,7 @@
 
           nativeBuildInputs = with pkgs; [
             go
+            git
           ];
 
           # Generate Swagger docs before building;
@@ -29,8 +30,11 @@
             export HOME=$TMPDIR
             export GOPATH=$TMPDIR/go
             export PATH=$GOPATH/bin:$PATH
-            go install github.com/swaggo/swag/cmd/swag@latest
-            swag init --parseDependency --parseInternal
+            export GOPROXY=direct
+            export GOSUMDB=off
+            go mod download
+            GOFLAGS="-mod=mod" go install github.com/swaggo/swag/cmd/swag@latest
+            GOFLAGS="-mod=mod" swag init --parseDependency --parseInternal
           '';
 
           ldflags = [ "-s" "-w" ];
