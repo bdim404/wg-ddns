@@ -57,7 +57,7 @@ With Nix package manager, you can easily install wg-ddns:
 nix profile install github:fernvenue/wg-ddns
 ```
 
-- Or build from source locally
+- Build from Source
 
 ```bash
 git clone https://github.com/fernvenue/wg-ddns.git
