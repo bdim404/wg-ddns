@@ -18,7 +18,7 @@
 
           src = ./.;
 
-          vendorHash = "sha256-wgZqHBHm0FqPr6UW4RbO8eFYJIDH/bOHfTVA6Q5Bc3Y=";
+          vendorHash = "sha256-VfSLrWuvJF4XwAW2BQGxh+3v9RiWmPdysw/nIdt2A9M=";
 
           nativeBuildInputs = with pkgs; [
             go
