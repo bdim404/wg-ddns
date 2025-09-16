@@ -18,7 +18,7 @@ A lightweight tool that provides DDNS dynamic DNS support for WireGuard.
 - [x] Rich logging output with INFO, DEBUG levels;
 - [x] Environment variable support;
 - [x] Provide systemd service template;
-- [ ] Package and deploy via Nix.
+- [x] Package and deploy via Nix.
 
 ## Parameters
 
@@ -44,6 +44,25 @@ In addition to command line parameters, all configuration options support enviro
 - `WG_DDNS_CHECK_INTERVAL`: Corresponds to `--check-interval`
 
 **Note**: Command line parameters take precedence over environment variables.
+
+## Installation
+
+### Nix Package Manager
+
+With Nix package manager, you can easily install wg-ddns:
+
+```bash
+# Install from GitHub repository
+nix profile install github:fernvenue/wg-ddns
+```
+
+```bash
+# Or build from source locally
+git clone https://github.com/fernvenue/wg-ddns.git
+cd wg-ddns
+nix build
+./result/bin/wg-ddns --help
+```
 
 ## Usage Examples
 

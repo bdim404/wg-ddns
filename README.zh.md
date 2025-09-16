@@ -16,7 +16,7 @@
 - [x] 豐富的日志輸出, 支援 INFO, DEBUG 等級別;
 - [x] 環境變量支援;
 - [x] 提供 systemd service 模板;
-- [ ] 通過 Nix 進行打包和部署.
+- [x] 通過 Nix 進行打包和部署.
 
 ## 參數說明
 
@@ -42,6 +42,25 @@
 - `WG_DDNS_CHECK_INTERVAL`: 對應 `--check-interval`
 
 **注意**: 命令行參數優先於環境變量.
+
+## 安装
+
+### Nix 包管理器
+
+通過 Nix 包管理器，你可以輕鬆安装 wg-ddns:
+
+```bash
+# 從 GitHub 倉庫安装
+nix profile install github:fernvenue/wg-ddns
+```
+
+```bash
+# 或從本地源碼構建
+git clone https://github.com/fernvenue/wg-ddns.git
+cd wg-ddns
+nix build
+./result/bin/wg-ddns --help
+```
 
 ## 使用示例
 
