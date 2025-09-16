@@ -51,12 +51,14 @@ In addition to command line parameters, all configuration options support enviro
 
 With Nix package manager, you can easily install wg-ddns:
 
-- Install from GitHub repository
+- Install from GitHub
+
 ```bash
 nix profile install github:fernvenue/wg-ddns
 ```
 
 - Or build from source locally
+
 ```bash
 git clone https://github.com/fernvenue/wg-ddns.git
 cd wg-ddns
