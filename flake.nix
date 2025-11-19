@@ -29,12 +29,6 @@
             runHook postInstall
           '';
 
-          postInstall = pkgs.lib.optionalString pkgs.stdenv.isLinux ''
-            mkdir -p $out/lib/systemd/system
-            cp wg-ddns.service $out/lib/systemd/system/
-            cp wg-ddns@.service $out/lib/systemd/system/
-          '';
-
           meta = with pkgs.lib; {
             description = "A lightweight tool that provides DDNS dynamic DNS support for WireGuard";
             homepage = "https://github.com/fernvenue/wg-ddns";
