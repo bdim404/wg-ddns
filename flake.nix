@@ -14,7 +14,7 @@
       {
         packages.default = pkgs.buildGoModule rec {
           pname = "wg-ddns";
-          version = "0.1.0";
+          version = "0.1.2";
 
           src = ./.;
 
